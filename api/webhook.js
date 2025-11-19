@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 
-const SHOPIFY_WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET;
+const SHOPIFY_SECRET = process.env.SHOPIFY_SECRET;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -8,21 +8,38 @@ export default async function handler(req, res) {
   }
 
   try {
-    if (SHOPIFY_WEBHOOK_SECRET) {
-      const hmac = req.headers['x-shopify-hmac-sha256'];
-      const body = JSON.stringify(req.body);
-      const hash = crypto
-        .createHmac('sha256', SHOPIFY_WEBHOOK_SECRET)
-        .update(body, 'utf8')
-        .digest('base64');
-
-      if (hash !== hmac) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+    let body = req.body;
+    if (typeof body === 'string') {
+      body = JSON.parse(body);
     }
 
-    const order = req.body;
+    if (SHOPIFY_SECRET) {
+      const hmacHeader = req.headers['x-shopify-hmac-sha256'];
+      
+      if (!hmacHeader) {
+        console.error('⚠️ HMAC header missing');
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
 
+      const rawBody = typeof req.body === 'string' 
+        ? req.body 
+        : JSON.stringify(req.body);
+      
+      const hash = crypto
+        .createHmac('sha256', SHOPIFY_SECRET)
+        .update(rawBody, 'utf8')
+        .digest('base64');
+
+      if (hash !== hmacHeader) {
+        console.error('⚠️ HMAC verification failed');
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+    } else {
+      console.warn('⚠️ SHOPIFY_SECRET not set, skipping HMAC verification');
+    }
+
+    const order = body;
+    
     console.log('=== NEW ORDER CREATED ===');
     console.log('Order ID:', order.id);
     console.log('Order Number:', order.order_number);
@@ -35,7 +52,7 @@ export default async function handler(req, res) {
       orderId: order.id
     });
   } catch (error) {
-    console.error('Error processing order:', error);
+    console.error('❌ Webhook error:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 }
